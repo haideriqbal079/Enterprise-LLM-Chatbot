@@ -1,35 +1,53 @@
+import os
+from typing import Iterator
+
+from dotenv import load_dotenv
 from groq import Groq
 
-from src.config import GROQ_API_KEY
+
+load_dotenv()
 
 
 class GroqService:
     def __init__(self):
-        if not GROQ_API_KEY:
-            raise ValueError("GROQ_API_KEY is not configured.")
+        api_key = os.getenv("GROQ_API_KEY")
 
-        self.client = Groq(api_key=GROQ_API_KEY)
+        if not api_key:
+            raise ValueError("GROQ_API_KEY is not configured")
+
+        self.client = Groq(api_key=api_key)
+
+        self.model = "openai/gpt-oss-120b"
 
     def generate_response(self, prompt: str) -> str:
         response = self.client.chat.completions.create(
-            model="openai/gpt-oss-120b",
+            model=self.model,
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an internal company knowledge assistant. "
-                        "Answer using the provided company knowledge. "
-                        "If the information is not available in the provided "
-                        "knowledge, clearly say that you do not have enough "
-                        "information."
-                    ),
-                },
                 {
                     "role": "user",
                     "content": prompt,
-                },
+                }
             ],
-            max_tokens=500,
+            temperature=0.2,
         )
 
         return response.choices[0].message.content
+
+    def stream_response(self, prompt: str) -> Iterator[str]:
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            temperature=0.2,
+            stream=True,
+        )
+
+        for chunk in stream:
+            content = chunk.choices[0].delta.content
+
+            if content:
+                yield content

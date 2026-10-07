@@ -1,4 +1,7 @@
+from typing import Iterator
+
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from src.api.schemas import ChatRequest, ChatResponse
@@ -108,3 +111,81 @@ def chat(request: ChatRequest):
 
     finally:
         db.close()
+
+
+@router.post("/stream")
+def chat_stream(request: ChatRequest):
+    def generate() -> Iterator[str]:
+        db = SessionLocal()
+
+        try:
+            conversation = get_or_create_conversation(
+                db,
+                request.session_id,
+            )
+
+            user_message = Message(
+                conversation_id=conversation.id,
+                role="user",
+                content=request.message,
+            )
+
+            db.add(user_message)
+            db.commit()
+
+            cache_key = f"chat:{request.message.strip().lower()}"
+
+            cached_response = redis_service.get(cache_key)
+
+            if cached_response:
+                yield cached_response
+                response = cached_response
+
+            else:
+                documents = search_documents(request.message)
+
+                knowledge_context = "\n\n".join(
+                    document["content"]
+                    for document in documents
+                )
+
+                prompt = build_prompt(
+                    prompt_type="grounded",
+                    knowledge_context=knowledge_context,
+                    question=request.message,
+                )
+
+                chunks = []
+
+                for chunk in groq_service.stream_response(prompt):
+                    chunks.append(chunk)
+                    yield chunk
+
+                response = "".join(chunks)
+
+                redis_service.set(
+                    cache_key,
+                    response,
+                    expire=3600,
+                )
+
+            assistant_message = Message(
+                conversation_id=conversation.id,
+                role="assistant",
+                content=response,
+            )
+
+            db.add(assistant_message)
+            db.commit()
+
+        finally:
+            db.close()
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
