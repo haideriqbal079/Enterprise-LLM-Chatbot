@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+python-dotenv
+groq
+sqlalchemy
+psycopg[binary]
+prometheus-fastapi-instrumentator
+redis
